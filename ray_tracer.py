@@ -211,8 +211,8 @@ class Scene:
         self.lights = []
         self.spotlights = []
         self.multi_sampling = False
-        self.image_width = 500
-        self.image_height = 500
+        self.image_width = 400
+        self.image_height = 400
 
     def load_from_file(self, filename):
         with open(filename, 'r') as f:
@@ -380,6 +380,8 @@ class Scene:
         point = closest.point
         normal = closest.normal
         view_dir = normalize(self.eye - point)
+        if np.dot(normal, view_dir) < 0:
+            normal = -normal
 
         # If reflective or transparent, ignore object's own color in direct shading:
         # As per instructions, for reflective/transparent:
