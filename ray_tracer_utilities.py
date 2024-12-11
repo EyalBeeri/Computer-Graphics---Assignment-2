@@ -29,17 +29,13 @@ def get_plane_local_coords(plane, hitPoint):
     # plane.normal is normalized
     n = plane.normal
     # Find a vector not parallel to n for constructing a coordinate system
-    if abs(n[0]) > abs(n[1]):
-        u = normalize(np.cross(n, np.array([0,1,0])))
+    if abs(n[0]) > abs(n[1]) and abs(n[0]) > abs(n[2]):
+        u = normalize(np.cross(n, np.array([0, 1, 0])))
     else:
-        u = normalize(np.cross(n, np.array([1,0,0])))
+        u = normalize(np.cross(n, np.array([1, 0, 0])))
 
     v = np.cross(n, u)
     # Project the hitPoint onto the plane coordinate system
-    # Need a reference point on the plane. You can find one by setting x,y=0 and solving for z, 
-    # or since we have the plane equation aX+bY+cZ+d=0, a point on plane could be:
-    # If c != 0, then a point on plane = (0,0,-d/c)
-    # We'll do this once and store it in the plane object.
     point_on_plane = plane.point_on_plane
     phit = hitPoint - point_on_plane
     local_x = np.dot(phit, u)

@@ -3,15 +3,15 @@ import cv2
 from ray_tracer_classes import *
 
 class Scene:
-    def __init__(self):
+    def __init__(self, image_width, image_height):
         self.eye = []
         self.ambient = []
         self.objects = []
         self.lights = []
         self.spotlights = []
         self.multi_sampling = False
-        self.image_width = 400
-        self.image_height = 400
+        self.image_width = image_width
+        self.image_height = image_height
 
     def load_from_file(self, filename):
         with open(filename, 'r') as f:
@@ -23,17 +23,6 @@ class Scene:
         # "i" lines define their intensities,
         # "o"/"r"/"t" define objects,
         # "c" define their colors & shininess.
-
-        materials = []
-        objects_info = []
-        directions = []
-        positions = []
-        intensities = []
-        scene_objects = []
-
-        # We'll first just store lines, then process after.
-        eye_line = None
-        ambient_line = None
 
         # We'll need to keep track of the order we encounter objects & lights
         object_lines = []
@@ -95,9 +84,9 @@ class Scene:
         # Build objects
         for (obj_def, col_def) in zip(object_lines, color_lines):
             ctype, vals = obj_def
-            r,g,b,sh = map(float, col_def)
+            r, g, b, sh = map(float, col_def)
             shininess = sh
-
+        
             if ctype == 'o':
                 # normal object
                 # Determine if sphere or plane by looking at 4th param
@@ -106,13 +95,13 @@ class Scene:
                     # sphere
                     center = np.array(v[0:3])
                     radius = v[3]
-                    mat = Material(ambient=np.array([r,g,b]), diffuse=np.array([r,g,b]), shininess=shininess)
+                    mat = Material(ambient=np.array([r, g, b]), diffuse=np.array([r, g, b]), shininess=shininess)
                     self.objects.append(Sphere(center, radius, mat))
                 else:
                     # plane
-                    a,b,c,d = v
-                    mat = Material(ambient=np.array([r,g,b]), diffuse=np.array([r,g,b]), shininess=shininess)
-                    self.objects.append(Plane(a,b,c,d, mat))
+                    a_plane, b_plane, c_plane, d_plane = v
+                    mat = Material(ambient=np.array([r, g, b]), diffuse=np.array([r, g, b]), shininess=shininess)
+                    self.objects.append(Plane(a_plane, b_plane, c_plane, d_plane, mat))
             elif ctype == 'r':
                 # reflective
                 v = list(map(float, vals))
@@ -124,18 +113,23 @@ class Scene:
                     self.objects.append(Sphere(center, radius, mat))
                 else:
                     # plane
-                    a,b,c,d = v
+                    a_plane, b_plane, c_plane, d_plane = v
                     mat = Material(reflective=True, shininess=shininess)
-                    self.objects.append(Plane(a,b,c,d, mat))
+                    self.objects.append(Plane(a_plane, b_plane, c_plane, d_plane, mat))
             elif ctype == 't':
                 # transparent
                 v = list(map(float, vals))
-                # transparent only spheres
-                center = np.array(v[0:3])
-                radius = v[3]
-                mat = Material(transparent=True, shininess=shininess)
-                self.objects.append(Sphere(center, radius, mat))
-
+                if v[3] > 0:
+                    # sphere
+                    center = np.array(v[0:3])
+                    radius = v[3]
+                    mat = Material(transparent=True, shininess=shininess)
+                    self.objects.append(Sphere(center, radius, mat))
+                else:
+                    # plane
+                    a_plane, b_plane, c_plane, d_plane = v
+                    mat = Material(transparent=True, shininess=shininess)
+                    self.objects.append(Plane(a_plane, b_plane, c_plane, d_plane, mat))
         # Build lights
         # The order of "d" lines corresponds with "p" and "i" lines.
         # If w=0 in d line => directional light
@@ -154,7 +148,7 @@ class Scene:
                 # spotlight
                 px,py,pz,cutoff = map(float, p_lines[p_spot_count])
                 p_spot_count+=1
-                self.lights.append(Spotlight(np.array([px,py,pz]), np.array([x,y,z]), intensity, cutoff))
+                self.lights.append(Spotlight(np.array([x,y,z]), intensity, np.array([px,py,pz]), cutoff))
             else:
                 # directional
                 self.lights.append(DirectionalLight(np.array([x,y,z]), intensity))
@@ -162,144 +156,107 @@ class Scene:
     def trace_ray(self, ray, depth=0):
         if depth > MAX_RECURSION_DEPTH:
             return np.zeros(3)
-
+    
         # Find nearest intersection
-        closest = Intersection()
+        closest_intersection = Intersection()
         for obj in self.objects:
-            inter = obj.intersect(ray)
-            if inter.t < closest.t:
-                closest = inter
-
-        if closest.t == float('inf'):
+            intersection = obj.intersect(ray)
+            if intersection.t < closest_intersection.t:
+                closest_intersection = intersection
+    
+        if closest_intersection.t == float('inf'):
             # no hit
             return np.zeros(3)  # background black
-
-        obj = closest.obj
-        mat = obj.get_material()
-        point = closest.point
-        normal = closest.normal
-        view_dir = normalize(self.eye - point)
-        if np.dot(normal, view_dir) < 0:
-            normal = -normal
-
-        # If reflective or transparent, ignore object's own color in direct shading:
-        # As per instructions, for reflective/transparent:
-        #   I = K_R * I_R (I_R from recursive ray)
-        # and K_R * I_R = reflection or refraction contribution only.
-        # They say "ignore material parameter (Ambient, Diffuse, Specular)" for reflective/transparent.
-        # That means if reflective:
-        #    reflect the ray and get color from reflection
-        # If transparent:
-        #    refract the ray and get color from that direction
-
-        # For normal objects:
-        # I = I_A * K_A + sum over lights [ K_D(N·L) + K_S(V·R)^n ] * S_i * I_i
-
-        # Also handle shadows:
-        # For each light, shoot a shadow ray and see if blocked.
-
+    
+        obj = closest_intersection.obj
+        material = obj.get_material()
+        intersection_point = closest_intersection.point
+        N = closest_intersection.normal
+        V = normalize(self.eye - intersection_point)
+        if np.dot(N, V) < 0:
+            N = -N
+    
         color = np.zeros(3)
-
-        if mat.reflective:
+    
+        if material.reflective:
             # Reflective object
-            refl_dir = reflect(ray.direction, normal)
-            refl_ray = Ray(point + normal * EPSILON, refl_dir)
-            color = self.trace_ray(refl_ray, depth+1)
-            return np.clip(color,0,1)
-        elif mat.transparent:
+            R = reflect(ray.direction, N)
+            reflected_ray = Ray(intersection_point + N * EPSILON, R)
+            color = self.trace_ray(reflected_ray, depth + 1)
+            return np.clip(color, 0, 1)
+        elif material.transparent:
             # Transparent object (sphere only)
-            # Refractive index: outside is air=1, inside sphere=1.5
-            # Determine if we are entering or exiting the sphere
-            outside = np.dot(ray.direction, normal) < 0
-            n1 = 1.0 if outside else 1.5
-            n2 = 1.5 if outside else 1.0
-            ref_normal = normal if outside else -normal
-            refr_dir = refract(ray.direction, ref_normal, n1, n2)
-            if refr_dir is None:
+            outside = np.dot(ray.direction, N) < 0
+            n1, n2 = (1.0, 1.5) if outside else (1.5, 1.0)
+            ref_normal = N if outside else -N
+            refracted_direction = refract(ray.direction, ref_normal, n1, n2)
+            if refracted_direction is None:
                 # total internal reflection
-                refl_dir = reflect(ray.direction, normal)
-                refl_ray = Ray(point + normal * EPSILON, refl_dir)
-                color = self.trace_ray(refl_ray, depth+1)
+                R = reflect(ray.direction, N)
+                reflected_ray = Ray(intersection_point + N * EPSILON, R)
+                color = self.trace_ray(reflected_ray, depth + 1)
             else:
                 # refracted ray
-                # Move the ray origin slightly inside or outside
-                refr_ray = Ray(point - ref_normal * EPSILON, refr_dir)
-                color = self.trace_ray(refr_ray, depth+1)
-            return np.clip(color,0,1)
+                refracted_ray = Ray(intersection_point - ref_normal * EPSILON, refracted_direction)
+                color = self.trace_ray(refracted_ray, depth + 1)
+            return np.clip(color, 0, 1)
         else:
             # Normal object, use Phong model
-            # Ambient:
-            Ia = self.ambient * mat.ambient
-            color += Ia
-
-            # For planes: checkerboard pattern affects the diffuse color only
+            I_a = self.ambient
+            K_a = material.ambient
+            color += I_a * K_a
+    
             if isinstance(obj, Plane):
-                local_x, local_y = get_plane_local_coords(obj, point)
-                mat_diffuse = checkerboard_color(mat.diffuse, local_x, local_y)
+                local_x, local_y = get_plane_local_coords(obj, intersection_point)
+                K_d = checkerboard_color(material.diffuse, local_x, local_y)
             else:
-                mat_diffuse = mat.diffuse
-
+                K_d = material.diffuse
+    
+            K_s = material.specular
+            shininess = material.shininess
+    
             for light in self.lights:
-                L, distToLight = light.get_direction(point)
+                L, dist_to_light = light.get_direction(intersection_point)
                 if L is None:
                     continue
-
-                # Check spotlight cutoff if spotlight
+    
                 spotlight_factor = 1.0
                 if isinstance(light, Spotlight):
-                    # Check if angle is within cutoff
-                    # angle = dot(L, light.direction)
                     angle = np.dot(-L, light.direction)
                     if angle < light.cutoff:
-                        # outside cutoff angle
                         continue
-                    else:
-                        spotlight_factor = angle
-
-                # Shadow check
-                # For spotlight: ensure object is not behind the spotlight
-                # Shoot a shadow ray from point+normal*EPSILON to light
-                shadow_orig = point + normal*EPSILON
-                shadow_ray = Ray(shadow_orig, L)
+                    spotlight_factor = angle
+    
+                shadow_origin = intersection_point + N * EPSILON
+                shadow_ray = Ray(shadow_origin, L)
                 shadow_hit = False
-
-                # If directional light, infinite distance => if any object hits
-                # If spotlight, must check if intersection is before reaching the light pos
-                for o in self.objects:
-                    sh_inter = o.intersect(shadow_ray)
-                    if sh_inter.t < float('inf'):
-                        # If directional light: any hit means shadow
-                        # If spotlight: check if sh_inter.t < distToLight
+    
+                for obj in self.objects:
+                    shadow_intersection = obj.intersect(shadow_ray)
+                    if shadow_intersection.t < float('inf'):
                         if isinstance(light, Spotlight):
-                            if sh_inter.t > EPSILON and sh_inter.t < distToLight:
+                            if shadow_intersection.t > EPSILON and shadow_intersection.t < dist_to_light:
                                 shadow_hit = True
                                 break
                         else:
-                            # directional
-                            if sh_inter.t > EPSILON:
+                            if shadow_intersection.t > EPSILON:
                                 shadow_hit = True
                                 break
-
+    
                 if shadow_hit:
-                    # no contribution from this light
                     continue
-
-                # Compute Phong terms
-                N = normal
+    
                 R = reflect(-L, N)
-                NdotL = max(0, np.dot(N,L))
-                RdotV = max(0, np.dot(R, view_dir))
-
-                Id = mat_diffuse * NdotL
-                Is = mat.specular * (RdotV ** mat.shininess)
-
-                # Add them up with light intensity
-                light_contrib = (Id + Is) * light.intensity * spotlight_factor
+                NdotL = max(0, np.dot(N, L))
+                RdotV = max(0, np.dot(R, V))
+    
+                I_d = K_d * NdotL
+                I_s = K_s * (RdotV ** shininess)
+    
+                light_contrib = (I_d + I_s) * light.intensity * spotlight_factor
                 color += light_contrib
-
-            return np.clip(color,0,1)
-
-
+    
+            return np.clip(color, 0, 1)
     def render(self, filename):
         img = np.zeros((self.image_height, self.image_width, 3), dtype=np.float32)
 
@@ -319,7 +276,7 @@ class Scene:
                             pixel_x = -1 + (x+sx)*px_size_x
                             pixel_y = -1 + (y+sy)*px_size_y
                             pixel_point = np.array([pixel_x, pixel_y, 0])
-                            direction = pixel_point - self.eye
+                            direction = normalize(pixel_point - self.eye)
                             ray = Ray(self.eye, direction)
                             color = self.trace_ray(ray,0)
                             samples.append(color)
@@ -328,7 +285,7 @@ class Scene:
                     pixel_x = -1 + (x+0.5)*px_size_x
                     pixel_y = -1 + (y+0.5)*px_size_y
                     pixel_point = np.array([pixel_x, pixel_y, 0])
-                    direction = pixel_point - self.eye
+                    direction = normalize(pixel_point - self.eye)
                     ray = Ray(self.eye, direction)
                     final_color = self.trace_ray(ray,0)
 
@@ -343,9 +300,9 @@ class Scene:
 
 scene_num = 1
 scene_file = f"./res/scene{scene_num}.txt"
-output_file = f"./scene{scene_num}.png"
+output_file = f"./out/scene{scene_num}.png"
 
-scene = Scene()
+scene = Scene(800, 800)
 scene.load_from_file(scene_file)
 scene.render(output_file)
 print("Rendered image saved to", output_file)
