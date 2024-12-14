@@ -220,13 +220,7 @@ class Scene:
                 if L is None:
                     continue
     
-                spotlight_factor = 1.0
-                if isinstance(light, Spotlight):
-                    angle = np.dot(-L, light.direction)
-                    if angle < light.cutoff:
-                        continue
-                    spotlight_factor = angle
-    
+                # Calculate shadows first
                 shadow_origin = intersection_point + N * EPSILON
                 shadow_ray = Ray(shadow_origin, L)
                 shadow_hit = False
@@ -246,6 +240,15 @@ class Scene:
                 if shadow_hit:
                     continue
     
+                # Calculate spotlight factor
+                spotlight_factor = 1.0
+                if isinstance(light, Spotlight):
+                    angle = np.dot(-L, light.direction)
+                    if angle < light.cutoff:
+                        continue
+                    spotlight_factor = angle
+    
+                # Calculate Phong model components
                 R = reflect(-L, N)
                 NdotL = max(0, np.dot(N, L))
                 RdotV = max(0, np.dot(R, V))
@@ -298,7 +301,7 @@ class Scene:
         cv2.imwrite(filename, img_bgr)
 
 
-scene_num = 1
+scene_num = 3
 scene_file = f"./res/scene{scene_num}.txt"
 output_file = f"./out/scene{scene_num}.png"
 
