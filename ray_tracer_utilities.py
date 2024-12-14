@@ -25,24 +25,6 @@ def refract(direction, normal, n1, n2):
         return None
     return eta * direction + (eta * cosi - math.sqrt(k)) * normal
 
-def get_plane_local_coords(plane, hitPoint):
-    # plane.normal is normalized
-    n = plane.normal
-    # Find a vector not parallel to n for constructing a coordinate system
-    if abs(n[0]) > abs(n[1]) and abs(n[0]) > abs(n[2]):
-        u = normalize(np.cross(n, np.array([0, 1, 0])))
-    else:
-        u = normalize(np.cross(n, np.array([1, 0, 0])))
-
-    v = np.cross(n, u)
-    # Project the hitPoint onto the plane coordinate system
-    point_on_plane = plane.point_on_plane
-    phit = hitPoint - point_on_plane
-    local_x = np.dot(phit, u)
-    local_y = np.dot(phit, v)
-    return local_x, local_y
-
-
 def checkerboard_color(rgbColor, x, y):
     scaleParameter = 0.5
     checkerboard = 0

@@ -207,8 +207,7 @@ class Scene:
             color += I_a * K_a
     
             if isinstance(obj, Plane):
-                local_x, local_y = get_plane_local_coords(obj, intersection_point)
-                K_d = checkerboard_color(material.diffuse, local_x, local_y)
+                K_d = checkerboard_color(material.diffuse, intersection_point[0], intersection_point[1])
             else:
                 K_d = material.diffuse
     
@@ -219,45 +218,40 @@ class Scene:
                 L, dist_to_light = light.get_direction(intersection_point)
                 if L is None:
                     continue
-    
-                # Calculate shadows first
+
+                # Offset the shadow ray origin slightly to avoid self-shadowing
                 shadow_origin = intersection_point + N * EPSILON
                 shadow_ray = Ray(shadow_origin, L)
                 shadow_hit = False
-    
+
                 for obj in self.objects:
                     shadow_intersection = obj.intersect(shadow_ray)
-                    if shadow_intersection.t < float('inf'):
-                        if isinstance(light, Spotlight):
-                            if shadow_intersection.t > EPSILON and shadow_intersection.t < dist_to_light:
-                                shadow_hit = True
-                                break
-                        else:
-                            if shadow_intersection.t > EPSILON:
-                                shadow_hit = True
-                                break
-    
+                    if shadow_intersection.t > EPSILON and shadow_intersection.t < dist_to_light:
+                        shadow_hit = True
+                        break
+
                 if shadow_hit:
                     continue
-    
-                # Calculate spotlight factor
+
+                # Calculate spotlight factor (for spotlights)
                 spotlight_factor = 1.0
                 if isinstance(light, Spotlight):
                     angle = np.dot(-L, light.direction)
                     if angle < light.cutoff:
                         continue
                     spotlight_factor = angle
-    
-                # Calculate Phong model components
+
+                # Phong shading
                 R = reflect(-L, N)
                 NdotL = max(0, np.dot(N, L))
                 RdotV = max(0, np.dot(R, V))
-    
+
                 I_d = K_d * NdotL
                 I_s = K_s * (RdotV ** shininess)
-    
+
                 light_contrib = (I_d + I_s) * light.intensity * spotlight_factor
                 color += light_contrib
+
     
             return np.clip(color, 0, 1)
     def render(self, filename):
@@ -305,7 +299,7 @@ scene_num = 3
 scene_file = f"./res/scene{scene_num}.txt"
 output_file = f"./out/scene{scene_num}.png"
 
-scene = Scene(800, 800)
+scene = Scene(400, 400)
 scene.load_from_file(scene_file)
 scene.render(output_file)
 print("Rendered image saved to", output_file)
