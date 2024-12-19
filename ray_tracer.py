@@ -171,11 +171,12 @@ class Scene:
         obj = closest_intersection.obj
         material = obj.get_material()
         intersection_point = closest_intersection.point
-        N = closest_intersection.normal
+        original_normal = closest_intersection.normal
+        N = original_normal
         V = normalize(self.eye - intersection_point)
         if np.dot(N, V) < 0:
-            N = -N
-    
+            N = -N  # This N is only for shading
+			
         color = np.zeros(3)
     
         if material.reflective:
@@ -186,9 +187,9 @@ class Scene:
             return np.clip(color, 0, 1)
         elif material.transparent:
             # Transparent object (sphere only)
-            outside = np.dot(ray.direction, N) < 0
+            outside = np.dot(ray.direction, original_normal) < 0
             n1, n2 = (1.0, 1.5) if outside else (1.5, 1.0)
-            ref_normal = N if outside else -N
+            ref_normal = original_normal  if outside else -original_normal
             refracted_direction = refract(ray.direction, ref_normal, n1, n2)
             if refracted_direction is None:
                 # total internal reflection
@@ -203,12 +204,11 @@ class Scene:
         else:
             # Normal object, use Phong model
             I_a = self.ambient
-            K_a = material.ambient            
+            K_a = material.ambient
+            K_d = material.diffuse            
             if isinstance(obj, Plane):
                 K_a = checkerboard_color(K_a, intersection_point[0], intersection_point[1])
                 K_d = checkerboard_color(material.diffuse, intersection_point[0], intersection_point[1])
-            else:
-                K_d = material.diffuse
 
             color += I_a * K_a
 
@@ -232,7 +232,7 @@ class Scene:
                         break
 
                 if shadow_hit:
-                    color += I_a * K_a
+                    # color += I_a * K_a
                     continue
 
                 # Calculate spotlight factor (for spotlights)
