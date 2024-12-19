@@ -203,17 +203,18 @@ class Scene:
         else:
             # Normal object, use Phong model
             I_a = self.ambient
-            K_a = material.ambient
-            color += I_a * K_a
-    
+            K_a = material.ambient            
             if isinstance(obj, Plane):
+                K_a = checkerboard_color(K_a, intersection_point[0], intersection_point[1])
                 K_d = checkerboard_color(material.diffuse, intersection_point[0], intersection_point[1])
             else:
                 K_d = material.diffuse
-    
+
+            color += I_a * K_a
+
             K_s = material.specular
             shininess = material.shininess
-    
+
             for light in self.lights:
                 L, dist_to_light = light.get_direction(intersection_point)
                 if L is None:
@@ -231,6 +232,7 @@ class Scene:
                         break
 
                 if shadow_hit:
+                    color += I_a * K_a
                     continue
 
                 # Calculate spotlight factor (for spotlights)
@@ -295,7 +297,7 @@ class Scene:
         cv2.imwrite(filename, img_bgr)
 
 
-scene_num = 3
+scene_num = 6
 scene_file = f"./res/scene{scene_num}.txt"
 output_file = f"./out/scene{scene_num}.png"
 
