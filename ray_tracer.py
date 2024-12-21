@@ -1,9 +1,12 @@
 import numpy as np
 import cv2
+from multiprocessing import Pool, Manager
 from ray_tracer_classes import *
+from ray_tracer_constants import MAX_RECURSION_DEPTH
+from ray_tracer_utilities import *
 
 class Scene:
-    def __init__(self, image_width, image_height):
+    def __init__(self, image_width, image_height, manager):
         self.eye = []
         self.ambient = []
         self.objects = []
@@ -12,6 +15,8 @@ class Scene:
         self.multi_sampling = False
         self.image_width = image_width
         self.image_height = image_height
+        self.progress = manager.Value('i', 0)
+        self.progress_lock = manager.Lock()
 
     def load_from_file(self, filename):
         with open(filename, 'r') as f:
@@ -176,7 +181,7 @@ class Scene:
         V = normalize(self.eye - intersection_point)
         if np.dot(N, V) < 0:
             N = -N  # This N is only for shading
-			
+    
         color = np.zeros(3)
     
         if material.reflective:
@@ -189,7 +194,7 @@ class Scene:
             # Transparent object (sphere only)
             outside = np.dot(ray.direction, original_normal) < 0
             n1, n2 = (1.0, 1.5) if outside else (1.5, 1.0)
-            ref_normal = original_normal  if outside else -original_normal
+            ref_normal = original_normal if outside else -original_normal
             refracted_direction = refract(ray.direction, ref_normal, n1, n2)
             if refracted_direction is None:
                 # total internal reflection
@@ -205,103 +210,120 @@ class Scene:
             # Normal object, use Phong model
             I_a = self.ambient
             K_a = material.ambient
-            K_d = material.diffuse            
+            K_d = material.diffuse
             if isinstance(obj, Plane):
                 K_a = checkerboard_color(K_a, intersection_point[0], intersection_point[1])
                 K_d = checkerboard_color(material.diffuse, intersection_point[0], intersection_point[1])
-
+    
             color += I_a * K_a
-
+    
             K_s = material.specular
             shininess = material.shininess
-
+    
             for light in self.lights:
                 L, dist_to_light = light.get_direction(intersection_point)
                 if L is None:
                     continue
-
+    
                 # Offset the shadow ray origin slightly to avoid self-shadowing
                 shadow_origin = intersection_point + N * EPSILON
                 shadow_ray = Ray(shadow_origin, L)
                 shadow_hit = False
-
+    
                 for obj in self.objects:
                     shadow_intersection = obj.intersect(shadow_ray)
                     if shadow_intersection.t > EPSILON and shadow_intersection.t < dist_to_light:
                         shadow_hit = True
                         break
-
+    
                 if shadow_hit:
-                    # color += I_a * K_a
                     continue
-
-                # Calculate spotlight factor (for spotlights)
-                spotlight_factor = 1.0
+    
                 if isinstance(light, Spotlight):
                     angle = np.dot(-L, light.direction)
                     if angle < light.cutoff:
                         continue
-                    spotlight_factor = angle
-
+    
                 # Phong shading
                 R = reflect(-L, N)
                 NdotL = max(0, np.dot(N, L))
                 RdotV = max(0, np.dot(R, V))
-
+    
                 I_d = K_d * NdotL
                 I_s = K_s * (RdotV ** shininess)
-
-                light_contrib = (I_d + I_s) * light.intensity * spotlight_factor
+    
+                light_contrib = (I_d + I_s) * light.intensity
                 color += light_contrib
-
     
             return np.clip(color, 0, 1)
-    def render(self, filename):
-        img = np.zeros((self.image_height, self.image_width, 3), dtype=np.float32)
-
-        # The screen is at z=0, from x=-1 to 1 and y=-1 to 1
-        # pixel size:
+    def render_chunk(self, y_start, y_end):
+        img_chunk = np.zeros((y_end - y_start, self.image_width, 3), dtype=np.float32)
         px_size_x = 2.0 / self.image_width
         px_size_y = 2.0 / self.image_height
 
-        for y in range(self.image_height):
+        for y in range(y_start, y_end):
             for x in range(self.image_width):
                 if self.multi_sampling:
-                    # 4 sample AA
-                    # jitter within pixel
                     samples = []
                     for sx in [0.25, 0.75]:
                         for sy in [0.25, 0.75]:
-                            pixel_x = -1 + (x+sx)*px_size_x
-                            pixel_y = -1 + (y+sy)*px_size_y
+                            pixel_x = -1 + (x + sx) * px_size_x
+                            pixel_y = -1 + (y + sy) * px_size_y
                             pixel_point = np.array([pixel_x, pixel_y, 0])
                             direction = normalize(pixel_point - self.eye)
                             ray = Ray(self.eye, direction)
-                            color = self.trace_ray(ray,0)
+                            color = self.trace_ray(ray, 0)
                             samples.append(color)
                     final_color = np.mean(samples, axis=0)
                 else:
-                    pixel_x = -1 + (x+0.5)*px_size_x
-                    pixel_y = -1 + (y+0.5)*px_size_y
+                    pixel_x = -1 + (x + 0.5) * px_size_x
+                    pixel_y = -1 + (y + 0.5) * px_size_y
                     pixel_point = np.array([pixel_x, pixel_y, 0])
                     direction = normalize(pixel_point - self.eye)
                     ray = Ray(self.eye, direction)
-                    final_color = self.trace_ray(ray,0)
+                    final_color = self.trace_ray(ray, 0)
 
-                img[self.image_height - 1 - y, x] = final_color
+                img_chunk[y - y_start, x] = final_color
 
-        # Convert to BGR and 0-255
-        img = np.clip(img,0,1)
+            with self.progress_lock:
+                self.progress.value += 1
+                total_rows = self.image_height
+                progress_percentage = (self.progress.value / total_rows) * 100
+                print(f"\rProgress: {progress_percentage:.2f}%", end='')
+
+        return img_chunk
+
+    def render(self, filename):
+        img = np.zeros((self.image_height, self.image_width, 3), dtype=np.float32)
+        num_processes = 8
+        chunk_size = self.image_height // num_processes
+
+        with Pool(processes=num_processes) as pool:
+            futures = []
+            for i in range(num_processes):
+                y_start = i * chunk_size
+                y_end = (i + 1) * chunk_size if i != num_processes - 1 else self.image_height
+                futures.append(pool.apply_async(self.render_chunk, (y_start, y_end)))
+
+            for i, future in enumerate(futures):
+                y_start = i * chunk_size
+                y_end = (i + 1) * chunk_size if i != num_processes - 1 else self.image_height
+                img_chunk = future.get()
+                img[y_start:y_end, :] = img_chunk
+
+        img = np.flipud(img)  # Flip the image vertically
+        img = np.clip(img, 0, 1)
         img = (img * 255).astype(np.uint8)
         img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
         cv2.imwrite(filename, img_bgr)
 
+if __name__ == '__main__':
+    manager = Manager()
+    scene_num = 5
+    scene_file = f"./res/scene{scene_num}.txt"
+    output_file = f"./out/scene{scene_num}.png"
 
-scene_num = 6
-scene_file = f"./res/scene{scene_num}.txt"
-output_file = f"./out/scene{scene_num}.png"
-
-scene = Scene(400, 400)
-scene.load_from_file(scene_file)
-scene.render(output_file)
-print("Rendered image saved to", output_file)
+    scene = Scene(800, 800, manager)
+    scene.load_from_file(scene_file)
+    scene.render(output_file)
+    print("\nRendered image saved to", output_file)

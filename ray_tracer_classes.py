@@ -1,7 +1,8 @@
 import numpy as np
-from ray_tracer_utilities import *
-from ray_tracer_constants import *
+from ray_tracer_utilities import normalize
+from ray_tracer_constants import EPSILON
 from abc import ABC, abstractmethod
+import math
 
 class Ray:
     def __init__(self, origin, direction):

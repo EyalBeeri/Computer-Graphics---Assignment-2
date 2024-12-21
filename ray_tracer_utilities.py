@@ -1,5 +1,5 @@
 import numpy as np
-from ray_tracer_constants import *
+from ray_tracer_constants import EPSILON
 import math
 
 def normalize(v):
@@ -25,22 +25,22 @@ def refract(direction, normal, n1, n2):
         return None
     return eta * direction + (eta * cosi - math.sqrt(k)) * normal
 
-def checkerboard_color(rgbColor, x, y):
-    scaleParameter = 0.5
+def checkerboard_color(rgb_color, x, y):
+    scale_parameter = 0.5
     checkerboard = 0
 
     if x < 0:
-        checkerboard += math.floor((0.5 - x) / scaleParameter)
+        checkerboard += math.floor((0.5 - x) / scale_parameter)
     else:
-        checkerboard += math.floor(x / scaleParameter)
+        checkerboard += math.floor(x / scale_parameter)
 
     if y < 0:
-        checkerboard += math.floor((0.5 - y) / scaleParameter)
+        checkerboard += math.floor((0.5 - y) / scale_parameter)
     else:
-        checkerboard += math.floor(y / scaleParameter)
+        checkerboard += math.floor(y / scale_parameter)
 
     checkerboard = (checkerboard * 0.5) - int(checkerboard * 0.5)
     checkerboard *= 2
     if checkerboard > 0.5:
-        return 0.5 * rgbColor
-    return rgbColor
+        return 0.5 * rgb_color
+    return rgb_color
