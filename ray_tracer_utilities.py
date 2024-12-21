@@ -28,7 +28,7 @@ def refract(direction, normal, n1, n2):
 def checkerboard_color(rgb_color, x, y):
     scale_parameter = 0.5
     checkerboard = 0
-
+    
     if x < 0:
         checkerboard += math.floor((0.5 - x) / scale_parameter)
     else:

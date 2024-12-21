@@ -17,9 +17,6 @@ class Intersection:
         self.obj = obj
 
 class Material:
-    # For normal objects: K_A, K_D from input c lines; K_S=(0.7,0.7,0.7), n from c line; K_R=0 if normal
-    # For reflective: ignore c line (use reflection color = (1,1,1))
-    # For transparent: ignore c line (use refraction color = from behind the object)
     def __init__(self, ambient=None, diffuse=None, shininess=10.0, reflective=False, transparent=False):
         self.ambient = ambient
         self.diffuse = diffuse
@@ -105,8 +102,6 @@ class Plane(Object3D):
         normal = self.normal
         return Intersection(t, point, normal, self)
 
-
-# Light classes
 class Light(ABC):
     def __init__(self, direction, intensity):
         self.direction = normalize(direction)

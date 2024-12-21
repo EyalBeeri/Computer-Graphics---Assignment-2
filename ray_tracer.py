@@ -29,24 +29,21 @@ class Scene:
         # "o"/"r"/"t" define objects,
         # "c" define their colors & shininess.
 
-        # We'll need to keep track of the order we encounter objects & lights
         object_lines = []
         color_lines = []
         d_lines = []
         p_lines = []
         i_lines = []
-        # reflect/transparent objects might ignore some lines, but we still read them in order.
 
         for line in lines:
             parts = line.split()
             c = parts[0]
             if c == 'e':
                 # eye
-                # e x y z mode_flag
+                # e x y z multi_sampling_flag
                 x,y,z,_ = map(float, parts[1:5])
                 self.eye = np.array([x,y,z])
-                # The 4th param can be used for multi-sampling: if >0 then enable
-                if len(parts) == 5 and float(parts[4]) > 0:
+                if float(parts[4]) > 0:
                     self.multi_sampling = True
             elif c == 'a':
                 # a r g b 1.0
@@ -56,9 +53,6 @@ class Scene:
                 # objects
                 # spheres: x y z radius
                 # planes: a b c d (d <=0)
-                # The type (sphere/plane) determined by sign of 4th value:
-                # if 4th >0 => sphere
-                # else plane
                 object_lines.append((c, parts[1:5]))
             elif c == 'c':
                 # color lines: r g b shininess
@@ -74,17 +68,8 @@ class Scene:
                 # intensity lines: r g b 1.0
                 i_lines.append(parts[1:5])
             else:
-                # Ignore unknown lines
                 pass
 
-        # now build objects
-        # According to instructions: "c" order corresponds to objects in order they appear.
-        # We must match object_lines with color_lines for normal objects.
-        # For reflective "r" and transparent "t", we ignore their "c" line in terms of K_A, K_D 
-        # and just store their shininess from c anyway? It's not fully clear. 
-        # The instructions say to ignore "c" parameters for reflection/transparent objects except shininess?
-        # We'll store the shininess from the c line anyway (the order is guaranteed? 
-        # We'll assume there's a one-to-one "c" for each "o"/"r"/"t" line in order.
 
         # Build objects
         for (obj_def, col_def) in zip(object_lines, color_lines):
@@ -135,15 +120,7 @@ class Scene:
                     a_plane, b_plane, c_plane, d_plane = v
                     mat = Material(transparent=True, shininess=shininess)
                     self.objects.append(Plane(a_plane, b_plane, c_plane, d_plane, mat))
-        # Build lights
-        # The order of "d" lines corresponds with "p" and "i" lines.
-        # If w=0 in d line => directional light
-        # If w=1 in d line => spotlight (must match with p line for position & cutoff)
-        # i lines correspond to each d line
 
-        # We must carefully match them:
-        # Assume: number of d lines = number of i lines
-        # number of p lines = number of spotlights only
         p_spot_count = 0
         for idx, dline in enumerate(d_lines):
             x,y,z,w = map(float, dline)
@@ -265,7 +242,7 @@ class Scene:
             for x in range(self.image_width):
                 if self.multi_sampling:
                     samples = []
-                    for sx in [0.25, 0.75]:
+                    for sx in [0.25, 0.75]: # 4 samples per pixel
                         for sy in [0.25, 0.75]:
                             pixel_x = -1 + (x + sx) * px_size_x
                             pixel_y = -1 + (y + sy) * px_size_y
@@ -319,7 +296,7 @@ class Scene:
 
 if __name__ == '__main__':
     manager = Manager()
-    scene_num = 5
+    scene_num = 2
     scene_file = f"./res/scene{scene_num}.txt"
     output_file = f"./out/scene{scene_num}.png"
 
